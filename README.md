@@ -1,4 +1,4 @@
-# High-Performance Voice Annotation Toolkit
+# EmoNet - Voice Annotation Toolkit
 
 This repository contains a suite of tools for analyzing audio files. The core functionalities are generating transcriptions, detailed emotional content scores, and speaker-specific embeddings. The toolkit is optimized for GPU acceleration and designed for efficient batch processing of large datasets.
 

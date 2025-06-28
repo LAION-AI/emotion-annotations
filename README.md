@@ -4,7 +4,7 @@ This repository contains a suite of tools for analyzing audio files. The core fu
 
 The primary goal is to generate rich, multi-faceted annotations for use in downstream tasks, such as training expressive Text-to-Speech (TTS) models. The underlying concepts are explored in more detail in LAION's research blog post, ["Do They See What We See?"](https://laion.ai/blog/do-they-see-what-we-see/).
 
-https://www.youtube.com/watch?v=MbEPTIPQH9k
+
 
 ## Features
 

@@ -1,4 +1,3 @@
-# client.py
 # Final client with caption display.
 
 import asyncio

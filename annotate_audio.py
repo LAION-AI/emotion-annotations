@@ -1,6 +1,3 @@
-# annotate_audio.py
-# Fixed JSON location and added optimizations
-
 import argparse
 import json
 import logging

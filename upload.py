@@ -37,7 +37,11 @@ for mp3_path, json_path in tqdm(file_pairs, desc="Processing files"):
         continue
 
     # Validate required fields
-    if not isinstance(metadata, dict) or "caption" not in metadata or "emotions" not in metadata:
+    if (
+        not isinstance(metadata, dict)
+        or "caption" not in metadata
+        or "emotions" not in metadata
+    ):
         skipped += 1
         continue
 
@@ -54,11 +58,9 @@ for mp3_path, json_path in tqdm(file_pairs, desc="Processing files"):
 print(f"Processed {len(data['audio'])} files | Skipped {skipped} invalid files")
 
 # Step 3: Create Hugging Face Dataset object
-features = Features({
-    "audio": Audio(),
-    "caption": Value("string"),
-    "emotions": Value("string")
-})
+features = Features(
+    {"audio": Audio(), "caption": Value("string"), "emotions": Value("string")}
+)
 
 dataset = Dataset.from_pandas(pd.DataFrame(data), features=features)
 

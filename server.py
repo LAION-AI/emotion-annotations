@@ -1,4 +1,3 @@
-# server.py
 # FINAL VERSION: Generates both transcription and emotion scores in one efficient pass.
 # Includes Flash Attention 2 enabled by default with a robust fallback.
 

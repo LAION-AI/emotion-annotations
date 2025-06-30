@@ -1,4 +1,3 @@
-# generate_timbre_embeddings.py
 import os
 import sys
 import torch

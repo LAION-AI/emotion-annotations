@@ -31,7 +31,7 @@ USE_DDP = NUM_GPUS > 1
 
 # Enable optimizations
 USE_FLASH_ATTENTION_2 = True  # Enable Flash Attention 2
-USE_TORCH_COMPILE = True  # Enable model compilation
+USE_TORCH_COMPILE = False  # Enable model compilation
 USE_FP16 = True  # Use half-precision
 BASE_BATCH_SIZE = 16  # Base batch size per GPU
 MAX_AUDIO_LENGTH = 30  # Max audio length in seconds

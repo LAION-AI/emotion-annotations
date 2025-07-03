@@ -449,11 +449,11 @@ def process_folder(input_folder: Path):
         logging.warning("No supported audio files found.")
         return
 
-    logging.info(f"Found {len(all_audio_files)} audio files.")
+    logging.info(f"Found {len(all_audio_files)} audio files. Checking which need processing...")
 
-    # 2. Filter files that need processing
+    # 2. Filter files that need processing, with a progress bar
     files_to_process = []
-    for audio_path in all_audio_files:
+    for audio_path in tqdm(all_audio_files, desc="Checking existing files"):
         json_path = audio_path.with_suffix(".json")
         if not json_path.exists():
             files_to_process.append(audio_path)

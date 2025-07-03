@@ -10,7 +10,7 @@ from joblib import Parallel, delayed
 # The root directory containing the folders with audio/json pairs.
 root_dir = os.path.expanduser("~/emilia-yodas/EN")
 # The Hugging Face Hub repository to push the dataset to.
-dataset_repo = "laion/Emilia-Annotated"
+dataset_repo = "laion/Emilia-Annotated-WIP"
 # Number of parallel jobs to run for scanning folders. -1 uses all available cores.
 N_JOBS = -1
 
@@ -116,7 +116,7 @@ print(dataset)
 
 # Step 4: Push the dataset to the Hugging Face Hub
 print(f"\nPushing dataset to Hugging Face Hub repository: {dataset_repo}")
-# dataset.push_to_hub(dataset_repo, max_shard_size="500MB")
+dataset.push_to_hub(dataset_repo, max_shard_size="500MB")
 
 print("\nScript finished.")
 # Note: The push_to_hub command is commented out.

@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Emolia — Ranked Search (Light)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* ---------- Light theme + compact spacing ---------- */
+  :root{
+    --bg:#f7f8fb; --text:#0f172a; --muted:#6b7280;
+    --panel:#ffffff; --border:#e5e7eb; --shadow:0 1px 8px rgba(16,24,40,.06);
+    --accent:#2563eb; --accent-ink:#ffffff;
+    --chip:#eef2ff; --chip-border:#dbeafe; --warn:#b45309; --danger:#b91c1c;
+  }
+  *{box-sizing:border-box}
+  body{margin:20px; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif}
+  h1{margin:0 0 6px; font-size:26px}
+  h3{margin:0 0 8px; font-size:18px}
+  h4{margin:0 0 6px; font-size:15px}
+  p.muted{color:var(--muted); margin:4px 0 10px}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow); padding:14px; margin:14px 0}
+  .grid-3{display:grid; grid-template-columns:1fr 1fr auto; gap:10px; align-items:end}
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  .grid-1{display:grid; grid-template-columns:1fr; gap:10px}
+  label{font-size:12px; color:var(--muted); display:block; margin-bottom:4px}
+  input,select,button{font:inherit}
+  input[type="text"],input[type="number"],select{width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:#fff; color:var(--text)}
+  select[multiple]{height:170px}
+  button{padding:10px 14px; border-radius:10px; border:1px solid transparent; cursor:pointer}
+  button.primary{background:var(--accent); color:var(--accent-ink)}
+  button.secondary{background:#f3f4f6; color:var(--text); border-color:var(--border)}
+  .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .pill{display:inline-flex; align-items:center; gap:8px; padding:4px 10px; border-radius:999px; background:var(--chip); border:1px solid var(--chip-border); font-size:12px; margin:4px 6px 0 0}
+  .pill a{color:#475569; text-decoration:none; cursor:pointer}
+  .muted{color:var(--muted)} .warn{color:var(--warn)} .err{color:var(--danger)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  audio{width:100%}
+  .tight{margin-top:6px}
+  @media (max-width: 980px){
+    .grid-3{grid-template-columns:1fr}
+    .grid-2{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<h1>🎧 Emolia — Ranked Search</h1>
+<p class="muted">Choose a numeric column to rank by, add conditions (range or expression), pick languages, set K, and play MP3s.</p>
+
+<!-- ---------- Connection panel (no overlap; 3-column grid) ---------- -->
+<div class="panel">
+  <div class="grid-3">
+    <div>
+      <label>API base (FastAPI)</label>
+      <input id="apiBase" type="text" value="http://65.21.214.117:8030" />
+      <div class="muted tight">Your <span class="mono">fastapi_parquet_rank.py</span> server.</div>
+    </div>
+    <div>
+      <label>Audio base (static server for MP3)</label>
+      <input id="audioBase" type="text" value="http://65.21.214.117:8040" />
+      <div class="muted tight">Root of <span class="mono">/mnt/sdc/emolia/audiodata</span>.</div>
+    </div>
+    <div>
+      <button class="primary" id="btnConnect">Connect & load columns</button>
+      <div id="connMsg" class="muted tight"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- Query builder ---------- -->
+<div class="panel">
+  <h3>Query builder</h3>
+
+  <div class="grid-2">
+    <div>
+      <label>Sort column (numeric)</label>
+      <select id="sortCol"></select>
+      <div class="muted tight">Pick any numeric dimension (e.g., <span class="mono">Pain_best</span>).</div>
+    </div>
+
+    <div>
+      <label>Order</label>
+      <select id="sortOrder">
+        <option value="desc">Descending (Top-K)</option>
+        <option value="asc">Ascending (Min-K)</option>
+      </select>
+    </div>
+
+    <div>
+      <label>Top-K / Min-K</label>
+      <input id="topK" type="number" min="1" max="1000" value="5" />
+    </div>
+
+    <div>
+      <div class="row" style="justify-content:space-between">
+        <label style="margin-bottom:0">Languages (multi)</label>
+        <label class="row" style="margin-bottom:0">
+          <input id="allLangs" type="checkbox" style="width:auto; margin-right:6px" />
+          ALL languages
+        </label>
+      </div>
+      <select id="langCodes" multiple>
+        <!-- Common Emolia codes -->
+        <option value="EN">EN — English</option>
+        <option value="DE">DE — German</option>
+        <option value="ES">ES — Spanish</option>
+        <option value="FR">FR — French</option>
+        <option value="IT">IT — Italian</option>
+        <option value="PT">PT — Portuguese</option>
+        <option value="RU">RU — Russian</option>
+        <option value="ZH">ZH — Chinese</option>
+        <option value="JA">JA — Japanese</option>
+        <option value="KO">KO — Korean</option>
+        <option value="TR">TR — Turkish</option>
+        <option value="PL">PL — Polish</option>
+        <option value="NL">NL — Dutch</option>
+        <option value="SV">SV — Swedish</option>
+        <option value="NO">NO — Norwegian</option>
+        <option value="DA">DA — Danish</option>
+        <option value="FI">FI — Finnish</option>
+        <option value="CS">CS — Czech</option>
+      </select>
+      <div class="muted tight">
+        If “ALL languages” is checked, the request sends no language filter → all languages included.
+        Otherwise, the server matches <span class="mono">language</span> or the 2-letter prefix of
+        <span class="mono">speaker</span>/<span class="mono">id</span>.
+      </div>
+    </div>
+  </div>
+
+  <hr style="border:0; border-top:1px solid var(--border); margin:14px 0">
+
+  <div class="grid-2">
+    <div>
+      <h4>Add a <em>range</em> condition</h4>
+      <div class="grid-3" style="grid-template-columns:1fr 150px 150px">
+        <div>
+          <label>Column</label>
+          <select id="rangeCol"></select>
+        </div>
+        <div>
+          <label>Min (inclusive)</label>
+          <input id="rangeMin" type="text" placeholder="no min"/>
+        </div>
+        <div>
+          <label>Max (inclusive)</label>
+          <input id="rangeMax" type="text" placeholder="no max"/>
+        </div>
+      </div>
+      <div class="tight"><button class="secondary" id="btnAddRange">Add range</button></div>
+      <div class="muted tight">Examples: <span class="mono">1 &lt; Age_best &lt; 2</span>, <span class="mono">Arousal_best &gt;= 1.5</span>.</div>
+    </div>
+
+    <div>
+      <h4>Add a <em>free expression</em> (NumExpr)</h4>
+      <div class="grid-3" style="grid-template-columns:1fr auto auto">
+        <div>
+          <label>Expression</label>
+          <input id="freeExpr" type="text" placeholder="Amusement_best + Elation_best > 5" />
+        </div>
+        <div style="align-self:end"><button class="secondary" id="btnAddExpr">Add</button></div>
+        <div style="align-self:end"><button class="secondary" id="btnClear">Clear</button></div>
+      </div>
+      <div class="muted tight">Allowed: + − × ÷, comparisons, parentheses, boolean <span class="mono">&amp;</span>/<span class="mono">|</span>. Column names must exist.</div>
+    </div>
+  </div>
+
+  <div class="tight">
+    <h4>Conditions</h4>
+    <div id="conds"></div>
+    <div id="condHint" class="muted">No conditions yet.</div>
+  </div>
+
+  <div class="tight">
+    <button class="primary" id="btnSearch">Search</button>
+  </div>
+</div>
+
+<div id="status" class="muted"></div>
+<div id="results"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+let NUMERIC_COLUMNS = [];
+let API_BASE = $("apiBase").value.trim();
+let AUDIO_BASE = $("audioBase").value.trim();
+let CONDITIONS = [];  // list of expression strings
+
+function setMsg(id, text, cls="muted"){
+  const el = $(id); el.className = cls; el.textContent = text;
+}
+function truncate(val, max=200){
+  if (val == null) return null;
+  let s = typeof val === "string" ? val : JSON.stringify(val);
+  if (s.length > max) s = s.slice(0, max-3) + "...";
+  return s;
+}
+function mp3UrlFromPath(mp3_path){
+  if (!mp3_path) return null;
+  const marker = "/audiodata/";
+  let rel = null;
+  const i = mp3_path.indexOf(marker);
+  if (i !== -1) rel = mp3_path.slice(i + marker.length);
+  else {
+    const j = mp3_path.lastIndexOf("audiodata/");
+    if (j !== -1) rel = mp3_path.slice(j + "audiodata/".length);
+  }
+  if (!rel) return null;
+  return AUDIO_BASE.replace(/\/+$/,"") + "/" + rel;
+}
+
+function renderConditions(){
+  const box = $("conds"); box.innerHTML = "";
+  if (!CONDITIONS.length){ $("condHint").style.display = "block"; return; }
+  $("condHint").style.display = "none";
+  CONDITIONS.forEach((c, idx) => {
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.innerHTML = `<span class="mono">${c}</span> <a title="remove">✕</a>`;
+    pill.querySelector("a").onclick = () => { CONDITIONS.splice(idx,1); renderConditions(); };
+    box.appendChild(pill);
+  });
+}
+
+async function connectAndLoad(){
+  API_BASE = $("apiBase").value.trim().replace(/\/+$/,"");
+  AUDIO_BASE = $("audioBase").value.trim().replace(/\/+$/,"");
+
+  try{
+    setMsg("connMsg","Connecting…");
+    const cols = await fetch(API_BASE + "/columns").then(r => r.json());
+    NUMERIC_COLUMNS = cols.filter(c => c.is_numeric).map(c => c.name).sort();
+    if (!NUMERIC_COLUMNS.length) throw new Error("No numeric columns returned.");
+
+    for (const id of ["sortCol","rangeCol"]){
+      const sel = $(id); sel.innerHTML = "";
+      for (const c of NUMERIC_COLUMNS){
+        const opt = document.createElement("option");
+        opt.value = c; opt.textContent = c; sel.appendChild(opt);
+      }
+    }
+
+    setMsg("connMsg","Connected. Numeric columns loaded: " + NUMERIC_COLUMNS.length);
+  }catch(err){
+    setMsg("connMsg","Failed: " + err.message,"err");
+  }
+}
+$("btnConnect").onclick = connectAndLoad;
+window.addEventListener("DOMContentLoaded", connectAndLoad);
+
+$("btnAddRange").onclick = () => {
+  const col = $("rangeCol").value;
+  const minV = $("rangeMin").value.trim();
+  const maxV = $("rangeMax").value.trim();
+  if (!col){ alert("Pick a column."); return; }
+  if (!minV && !maxV){ alert("Set a min or a max."); return; }
+  let expr = "";
+  if (minV && maxV) expr = `${col} >= ${minV} & ${col} <= ${maxV}`;
+  else if (minV) expr = `${col} >= ${minV}`;
+  else expr = `${col} <= ${maxV}`;
+  CONDITIONS.push(expr);
+  $("rangeMin").value = ""; $("rangeMax").value = "";
+  renderConditions();
+};
+
+$("btnAddExpr").onclick = () => {
+  const exp = $("freeExpr").value.trim();
+  if (!exp){ alert("Enter an expression."); return; }
+  CONDITIONS.push(exp);
+  $("freeExpr").value = "";
+  renderConditions();
+};
+
+$("btnClear").onclick = () => { CONDITIONS = []; renderConditions(); setMsg("status",""); $("results").innerHTML = ""; };
+
+/* ALL languages UX:
+   - If checked → disable multi-select and send no lang_codes (server includes all).
+   - If unchecked → re-enable multi-select. */
+$("allLangs").addEventListener("change", (e) => {
+  const m = $("langCodes");
+  if (e.target.checked){ m.selectedIndex = -1; m.disabled = true; }
+  else { m.disabled = false; }
+});
+
+$("btnSearch").onclick = async () => {
+  const col = $("sortCol").value;
+  const order = $("sortOrder").value; // 'desc' or 'asc'
+  const k = parseInt($("topK").value || "5", 10);
+  if (!col){ alert("Pick sort column."); return; }
+  if (!(k>0)){ alert("K must be >= 1."); return; }
+
+  let lang_codes = [];
+  if (!$("allLangs").checked){
+    lang_codes = Array.from($("langCodes").selectedOptions).map(o => o.value);
+  }
+
+  const metric = (order === "desc") ? "top" : "min";
+  const body = {
+    metric, column: col, k,
+    filters: CONDITIONS,
+    lang_codes,
+    select: ["id","language","speaker","emotion_caption","text","mp3_path", col]
+  };
+
+  setMsg("status", "Running query…");
+  $("results").innerHTML = "";
+
+  try{
+    const t0 = performance.now();
+    const res = await fetch(API_BASE + "/rank", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    if (!res.ok){
+      const txt = await res.text();
+      throw new Error(`HTTP ${res.status} — ${txt}`);
+    }
+    const data = await res.json();
+    const ms = Math.round(performance.now() - t0);
+    setMsg("status", `Done in ${ms} ms. Rows after filters: ${data.rowcount_after_filters}. Showing ${data.rows.length}.`);
+
+    const wrap = $("results");
+    data.rows.forEach((row, i) => {
+      const card = document.createElement("div");
+      card.className = "panel";
+      card.style.margin = "10px 0";
+
+      const title = document.createElement("div");
+      title.innerHTML = `<strong>#${i+1}</strong> — <span class="mono">${row.id || "(no id)"}</span>`;
+      card.appendChild(title);
+
+      const meta = document.createElement("div");
+      meta.className = "tight";
+      const show = (k,v) => `<div><span class="muted">${k}:</span> ${truncate(v)}</div>`;
+      meta.innerHTML =
+        show("language", row.language) +
+        show("speaker", row.speaker) +
+        show("emotion_caption", row.emotion_caption) +
+        show("text", row.text) +
+        show("mp3_path", row.mp3_path) +
+        show("score_col", `${$("sortCol").value} = ${row[$("sortCol").value]}`);
+      card.appendChild(meta);
+
+      const url = mp3UrlFromPath(row.mp3_path);
+      if (url){
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        audio.src = url;
+        card.appendChild(audio);
+      }else{
+        const warn = document.createElement("div");
+        warn.className = "warn tight";
+        warn.textContent = "Cannot map mp3_path to AUDIO_BASE (check paths).";
+        card.appendChild(warn);
+      }
+
+      wrap.appendChild(card);
+    });
+
+  }catch(err){
+    setMsg("status", "Error: " + err.message, "err");
+  }
+};
+</script>
+
+<hr style="border:0; border-top:1px solid var(--border); margin:16px 0 8px">
+<h3>Serve MP3s</h3>
+<p class="muted">
+  Run a tiny HTTP server rooted at <span class="mono">/mnt/sdc/emolia/audiodata</span>, then set <b>Audio base</b> above:
+</p>
+<pre class="mono" style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px;overflow:auto">
+PORT=8040
+python3 -m http.server "$PORT" --directory /mnt/sdc/emolia/audiodata
+</pre>
+
+</body>
+</html>

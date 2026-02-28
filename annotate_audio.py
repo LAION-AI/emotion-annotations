@@ -37,8 +37,8 @@ BASE_BATCH_SIZE = 16  # Base batch size per GPU
 MAX_AUDIO_LENGTH = 30  # Max audio length in seconds
 
 # Model and Audio Parameters
-WHISPER_MODEL_ID = "mkrausio/EmoWhisper-AnS-Small-v0.1"
-HF_MLP_REPO_ID = "laion/Empathic-Insight-Voice-Small"
+WHISPER_MODEL_ID = "laion/BUD-E-Whisper"
+HF_MLP_REPO_ID = "laion/Empathic-Insight-Voice-Plus"
 LOCAL_MODELS_DIR = Path("./models_cache")  # Dedicated directory for downloaded models
 SAMPLING_RATE = 16000
 
@@ -48,9 +48,50 @@ WHISPER_EMBED_DIM = 768
 PROJECTION_DIM = 64
 MLP_HIDDEN_DIMS = [64, 32, 16]
 MLP_DROPOUTS = [0.0, 0.1, 0.1, 0.1]
+POOLED_DIM = 3072  # 4 * 768 (mean + min + max + std)
+
+# Quality expert filenames (use PooledEmbeddingMLP instead of FullEmbeddingMLP)
+QUALITY_EXPERT_FILES = {
+    "model_score_overall_quality_best.pth",
+    "model_score_speech_quality_best.pth",
+    "model_score_background_quality_best.pth",
+    "model_score_content_enjoyment_best.pth",
+}
+
+# Total expected expert count: 55 emotion + 4 quality = 59
+EXPECTED_TOTAL_EXPERTS = 59
 
 # List of supported audio file extensions
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
+
+# Global flag for caption sanitization (set from CLI args)
+SANITIZE_CAPTIONS = True
+
+
+def sanitize_caption(text: str) -> str:
+    """
+    Fix a common BUD-E-Whisper decoder artifact where captions start with
+    spurious capital letters before the real text begins.
+
+    If two of the first three characters are uppercase, everything before the
+    second uppercase letter is removed. This handles patterns like:
+      "AThis is a sentence" -> "This is a sentence"
+      "AbCdef ghi"          -> "Cdef ghi"
+      "ABHello world"       -> "BHello world"
+
+    Normal captions (e.g. "Hello world") are returned unchanged.
+    """
+    if not SANITIZE_CAPTIONS or len(text) < 3:
+        return text
+
+    prefix = text[:3]
+    upper_positions = [i for i, c in enumerate(prefix) if c.isupper()]
+
+    if len(upper_positions) >= 2:
+        second_upper = upper_positions[1]
+        return text[second_upper:]
+
+    return text
 
 
 class FullEmbeddingMLP(nn.Module):
@@ -88,19 +129,60 @@ class FullEmbeddingMLP(nn.Module):
         return self.mlp(projected)
 
 
+class PooledEmbeddingMLP(nn.Module):
+    """Architecture for quality expert models using pooled features (mean+min+max+std)."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        projection_dim: int,
+        mlp_hidden_dims: List[int],
+        mlp_dropout_rates: List[float],
+    ):
+        super().__init__()
+        self.proj = nn.Linear(input_dim, projection_dim)
+        layers = [nn.ReLU(), nn.Dropout(mlp_dropout_rates[0])]
+        current_dim = projection_dim
+        for i, h_dim in enumerate(mlp_hidden_dims):
+            layers.extend(
+                [
+                    nn.Linear(current_dim, h_dim),
+                    nn.ReLU(),
+                    nn.Dropout(mlp_dropout_rates[i + 1]),
+                ]
+            )
+            current_dim = h_dim
+        layers.append(nn.Linear(current_dim, 1))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mlp(self.proj(x))
+
+
+def pool_embedding(embedding: torch.Tensor) -> torch.Tensor:
+    """Pool encoder output [B, seq_len, 768] -> [B, 3072] using mean+min+max+std."""
+    mean_pool = embedding.mean(dim=1)
+    min_pool = embedding.min(dim=1).values
+    max_pool = embedding.max(dim=1).values
+    std_pool = embedding.std(dim=1)
+    return torch.cat([mean_pool, min_pool, max_pool, std_pool], dim=1)
+
+
 def load_models_and_processor(device: torch.device, use_fp16: bool = True):
     """
-    Loads all required models (Whisper and MLPs) from Hugging Face Hub into memory.
+    Loads all required models (Whisper, emotion MLPs, and quality MLPs)
+    from Hugging Face Hub into memory.
     This function is called once per process in DDP mode.
     """
-    rank = dist.get_rank() if USE_DDP else 0
+    ddp_active = dist.is_initialized()
+    rank = dist.get_rank() if ddp_active else 0
     if rank == 0:
         logging.info("Starting model loading process...")
 
     LOCAL_MODELS_DIR.mkdir(exist_ok=True, parents=True)
 
     # Synchronize processes before model loading
-    if USE_DDP:
+    if ddp_active:
         dist.barrier()
 
     # --- Robust Whisper Model Loading with Flash Attention Fallback ---
@@ -122,7 +204,6 @@ def load_models_and_processor(device: torch.device, use_fp16: bool = True):
                 WHISPER_MODEL_ID,
                 torch_dtype=whisper_dtype,
                 cache_dir=LOCAL_MODELS_DIR,
-                use_safetensors=True,
                 attn_implementation="flash_attention_2",
             )
             if rank == 0:
@@ -139,7 +220,6 @@ def load_models_and_processor(device: torch.device, use_fp16: bool = True):
             WHISPER_MODEL_ID,
             torch_dtype=whisper_dtype,
             cache_dir=LOCAL_MODELS_DIR,
-            use_safetensors=True,
             attn_implementation="sdpa",
         )
         if rank == 0:
@@ -177,29 +257,43 @@ def load_models_and_processor(device: torch.device, use_fp16: bool = True):
         )
 
     # Synchronize after download
-    if USE_DDP:
+    if ddp_active:
         dist.barrier()
 
-    mlp_models = {}
+    emotion_models = {}  # Full-sequence emotion/attribute experts
+    quality_models = {}  # Pooled-feature quality experts
     mlp_files = list(mlp_models_dir.glob("*.pth"))
 
     if rank == 0:
         logging.info(f"Found {len(mlp_files)} MLP model files.")
 
     for model_path in mlp_files:
-        filename = model_path.stem
-        parts = filename.split("_")
+        filename = model_path.name
+        stem = model_path.stem
+        parts = stem.split("_")
         dimension_name = (
             "_".join(parts[1:-1]) if "best" in parts[-1] else "_".join(parts[1:])
         )
 
-        mlp_model = FullEmbeddingMLP(
-            seq_len=WHISPER_SEQ_LEN,
-            embed_dim=WHISPER_EMBED_DIM,
-            projection_dim=PROJECTION_DIM,
-            mlp_hidden_dims=MLP_HIDDEN_DIMS,
-            mlp_dropout_rates=MLP_DROPOUTS,
-        ).to(device)
+        is_quality = filename in QUALITY_EXPERT_FILES
+
+        if is_quality:
+            # Load as PooledEmbeddingMLP
+            mlp_model = PooledEmbeddingMLP(
+                input_dim=POOLED_DIM,
+                projection_dim=PROJECTION_DIM,
+                mlp_hidden_dims=MLP_HIDDEN_DIMS,
+                mlp_dropout_rates=MLP_DROPOUTS,
+            ).to(device)
+        else:
+            # Load as FullEmbeddingMLP
+            mlp_model = FullEmbeddingMLP(
+                seq_len=WHISPER_SEQ_LEN,
+                embed_dim=WHISPER_EMBED_DIM,
+                projection_dim=PROJECTION_DIM,
+                mlp_hidden_dims=MLP_HIDDEN_DIMS,
+                mlp_dropout_rates=MLP_DROPOUTS,
+            ).to(device)
 
         state_dict = torch.load(model_path, map_location=device)
         if any(k.startswith("_orig_mod.") for k in state_dict.keys()):
@@ -219,25 +313,31 @@ def load_models_and_processor(device: torch.device, use_fp16: bool = True):
             except Exception as e:
                 logging.warning(f"MLP compilation failed: {e}")
 
-        mlp_models[dimension_name] = mlp_model
+        if is_quality:
+            quality_models[dimension_name] = mlp_model
+        else:
+            emotion_models[dimension_name] = mlp_model
 
     if rank == 0:
-        logging.info("All models loaded successfully.")
+        logging.info(
+            f"Loaded {len(emotion_models)} emotion experts + {len(quality_models)} quality experts."
+        )
 
-    return whisper_processor, whisper_model, mlp_models
+    return whisper_processor, whisper_model, emotion_models, quality_models
 
 
 class InferenceProcessor:
     """A class to manage the loaded models and perform efficient batch inference."""
 
-    def __init__(self, whisper_processor, whisper_model, mlp_models, device):
+    def __init__(self, whisper_processor, whisper_model, emotion_models, quality_models, device):
         self.whisper_processor = whisper_processor
         self.whisper_model = whisper_model
-        self.mlp_models = mlp_models
+        self.emotion_models = emotion_models
+        self.quality_models = quality_models
         self.device = device
 
     def process_batch(self, audio_paths: List[Path]) -> List[Dict[str, Any]]:
-        """Processes a batch of audio files, generating transcription and emotion scores."""
+        """Processes a batch of audio files, generating transcription, emotion scores, and quality scores."""
         if not audio_paths:
             return []
 
@@ -274,27 +374,39 @@ class InferenceProcessor:
                 predicted_ids, skip_special_tokens=True
             )
 
-            # 3. Use the SAME encoder output's hidden state for emotion analysis
+            # 3. Use the SAME encoder output's hidden state for all experts
             embeddings = encoder_outputs.last_hidden_state
+
+            # 4. Compute pooled features for quality experts (once for entire batch)
+            pooled_features = pool_embedding(embeddings.float())
+            if USE_FP16 and self.device.type == "cuda":
+                pooled_features = pooled_features.half()
 
             batch_results = []
             for i in range(embeddings.size(0)):
                 single_embedding = embeddings[i : i + 1]
-                emotion_predictions = {}
-                for dim, mlp in self.mlp_models.items():
-                    # Ensure consistent precision
-                    if USE_FP16 and self.device.type == "cuda":
-                        single_embedding = single_embedding.half()
-                    emotion_predictions[dim] = mlp(single_embedding).item()
+                single_pooled = pooled_features[i : i + 1]
 
-                # Assemble the final result with the caption and emotion scores
+                # Run emotion experts (full sequence)
+                all_predictions = {}
+                if USE_FP16 and self.device.type == "cuda":
+                    single_embedding = single_embedding.half()
+                for dim, mlp in self.emotion_models.items():
+                    all_predictions[dim] = round(mlp(single_embedding).item(), 4)
+
+                # Run quality experts (pooled features)
+                for dim, mlp in self.quality_models.items():
+                    all_predictions[dim] = round(mlp(single_pooled).item(), 4)
+
+                # Apply caption sanitization
+                caption = sanitize_caption(captions[i].strip())
+
+                # Assemble the final result
                 batch_results.append(
                     {
-                        "audio_file": str(
-                            valid_audios[i]["path"]
-                        ),  # Store full path for reference
-                        "caption": captions[i].strip(),
-                        "emotions": emotion_predictions,
+                        "audio_file": str(valid_audios[i]["path"]),
+                        "caption": caption,
+                        "emotions": all_predictions,
                     }
                 )
 
@@ -365,11 +477,11 @@ def process_worker(rank, world_size, input_folder, file_chunk):
             logging.info(f"Using batch size: {batch_size} per GPU")
 
         # Load models
-        whisper_processor, whisper_model, mlp_models = load_models_and_processor(
-            device, USE_FP16
+        whisper_processor, whisper_model, emotion_models, quality_models = (
+            load_models_and_processor(device, USE_FP16)
         )
         inference_processor = InferenceProcessor(
-            whisper_processor, whisper_model, mlp_models, device
+            whisper_processor, whisper_model, emotion_models, quality_models, device
         )
 
         # Process file chunk
@@ -436,6 +548,7 @@ def process_folder(input_folder: Path):
     logging.info(
         f"Using optimizations: FlashAttention2={USE_FLASH_ATTENTION_2}, TorchCompile={USE_TORCH_COMPILE}"
     )
+    logging.info(f"Caption sanitization: {'ON' if SANITIZE_CAPTIONS else 'OFF'}")
 
     # 1. Scan for all supported audio files recursively.
     logging.info(f"Scanning for audio files in '{input_folder}'...")
@@ -465,7 +578,7 @@ def process_folder(input_folder: Path):
             if (
                 "caption" not in data
                 or "emotions" not in data
-                or len(data.get("emotions", {})) < 55
+                or len(data.get("emotions", {})) < EXPECTED_TOTAL_EXPERTS
             ):
                 files_to_process.append(audio_path)
         except Exception:
@@ -477,23 +590,24 @@ def process_folder(input_folder: Path):
 
     logging.info(f"Processing {len(files_to_process)} files...")
 
-    # 3. Split files across GPUS
-    chunk_size = len(files_to_process) // WORLD_SIZE
+    # 3. Split files across GPUs
+    num_workers = min(WORLD_SIZE, len(files_to_process))
+    chunk_size = max(1, len(files_to_process) // num_workers)
     file_chunks = [
         files_to_process[i : i + chunk_size]
         for i in range(0, len(files_to_process), chunk_size)
     ]
-    # Ensure we have exactly WORLD_SIZE chunks
-    while len(file_chunks) < WORLD_SIZE:
+    # Ensure we have exactly num_workers chunks
+    while len(file_chunks) < num_workers:
         file_chunks.append([])
 
     # 4. Spawn worker processes
     processes = []
-    for rank in range(WORLD_SIZE):
+    for rank in range(num_workers):
         if file_chunks[rank]:
             p = mp.Process(
                 target=process_worker,
-                args=(rank, WORLD_SIZE, input_folder, file_chunks[rank]),
+                args=(rank, num_workers, input_folder, file_chunks[rank]),
             )
             p.start()
             processes.append(p)
@@ -513,13 +627,21 @@ if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)
 
     parser = argparse.ArgumentParser(
-        description="Multi-GPU audio processing for transcription and emotion analysis",
+        description="Multi-GPU audio processing for transcription, emotion analysis, and quality scoring",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "input_folder", type=str, help="Path to folder containing audio files"
     )
+    parser.add_argument(
+        "--no-caption-sanitize",
+        action="store_true",
+        help="Disable caption sanitization (removal of spurious leading capital letters)",
+    )
     args = parser.parse_args()
+
+    # Set global sanitization flag
+    SANITIZE_CAPTIONS = not args.no_caption_sanitize
 
     input_path = Path(args.input_folder)
     if not input_path.is_dir():

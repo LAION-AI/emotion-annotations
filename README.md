@@ -4,6 +4,23 @@ This repository contains a suite of tools for analyzing audio files. The core fu
 
 The primary goal is to generate rich, multi-faceted annotations for use in downstream tasks, such as training expressive Text-to-Speech (TTS) models. The underlying concepts are explored in more detail in LAION's research blog post, ["Do They See What We See?"](https://laion.ai/blog/do-they-see-what-we-see/).
 
+## Companion project: VoiceNet
+
+This repository (EmoNet / Empathic‑Insight‑Voice) answers **which emotion is expressed** — the 40
+[EmoNet](https://huggingface.co/laion/Empathic-Insight-Voice-Plus) emotions plus Valence, Arousal and
+audio‑quality scores. Its companion, **VoiceNet**, answers the complementary question — **how the
+speech is delivered** — predicting **57 perceptual voice/prosody dimensions** (voice age, arousal,
+valence, warmth, brightness, tempo, resonance placement, speaking style, …) on a 0–6 rubric.
+
+Run both models on the same clip to get a complete perceptual description of a voice performance.
+
+- **VoiceNet project & docs:** <https://github.com/LAION-AI/voicenet>
+- **VoiceNet live demo:** <https://projects.laion.ai/voicenet/>
+- **VoiceNet taxonomy (57 dims × 0–6):** [`taxonomy/voicenet_taxonomy.md`](https://github.com/LAION-AI/voicenet/blob/main/taxonomy/voicenet_taxonomy.md)
+- **EmoNet taxonomy (40 emotions):** [`taxonomy/emonet_taxonomy.md`](https://github.com/LAION-AI/voicenet/blob/main/taxonomy/emonet_taxonomy.md)
+
+The VoiceNet taxonomy and project come from the forthcoming (not yet published) VoiceNet paper.
+
 ## Features
 
 -   **59 Expert Annotations**: Provides transcription, **55 emotion/attribute scores**, and **4 audio quality scores** from a single, efficient pass over the audio using the **[Empathic Insight Voice Plus](https://huggingface.co/laion/Empathic-Insight-Voice-Plus)** models, which are based on the **EmoNet** architecture and the **[BUD-E-Whisper](https://huggingface.co/laion/BUD-E-Whisper)** encoder.
